@@ -1,0 +1,4 @@
+﻿good,model,origin,reason
+Морква,snaive+yoy,2020-07-01,implausible forecast (x-0.05..x0.77 of last price)
+Морква,snaive+yoy,2024-07-01,implausible forecast (x-0.23..x1.04 of last price)
+Яйця,SARIMA,2023-01-01,"Unable to allocate 416. KiB for an array with shape (27, 27, 73) and data type float64"
