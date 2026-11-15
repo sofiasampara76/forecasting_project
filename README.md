@@ -25,16 +25,19 @@ notebooks/
   01_data_preparation.ipynb
   02_eda_seasonality.ipynb
   03_forecasting_results.ipynb
+  04_optimization_bridge.ipynb
 results/                Seasonality and backtest CSV outputs
+  figures/              PNG charts written by notebooks 03 and 04 (used in the presentation)
 src/
-  data/                 Data extraction script
+  data/                 Data extraction scripts (main CSV, final holdout from the XLSX)
   eda/                  Supporting exploratory-analysis scripts
-  forecasting/          Four successive baseline script versions
+  forecasting/          Four successive baseline script versions (v4 is current and importable)
+  reporting/            Shared chart labels and style for notebooks 03 and 04
 README.md
 requirements.txt
 ```
 
-`data/raw/136-indeksi-spozhivchikh-tsin.xlsx` is an additional source file retained for reference; the main forecasting workflow uses `136.csv`.
+Both raw files come from the [data.gov.ua dataset page](https://data.gov.ua/dataset/c1cd8f39-c2ee-4f20-8c8a-6cdde6e6f343) and go in `data/raw/` (git-ignored): `136. Індекси споживчих цін.csv` saved as `136.csv`, and `136. Індекси споживчих цін.xlsx` saved as `136-indeksi-spozhivchikh-tsin.xlsx`. The CSV is the modelling snapshot (to June 2025). The XLSX was published later and continues the same series; `src/data/prepare_holdout.py` takes only the months it adds after the CSV (July–September 2025 at the time of writing) as a final out-of-sample check, after verifying that the two files agree on every overlapping value.
 
 ## Setup
 
@@ -61,13 +64,16 @@ Run the notebooks in order:
 1. **Dataset context and selection** — [`notebooks/00_dataset_selection.ipynb`](notebooks/00_dataset_selection.ipynb) profiles the primary CSV, its indicators, frequencies, coverage, products, regions, units, and observation notes, then documents the six selected targets.
 2. **Preparation and quality checks** — [`notebooks/01_data_preparation.ipynb`](notebooks/01_data_preparation.ipynb) extracts monthly `AVG_CONS_PRCS` records, writes `data/processed/avg_prices_monthly.csv`, checks coverage and missingness, builds the national target panel, and flags extreme monthly changes for review. Flags do not automatically remove observations.
 3. **Seasonality and trend EDA** — [`notebooks/02_eda_seasonality.ipynb`](notebooks/02_eda_seasonality.ipynb) performs robust STL decomposition on log prices, compares annual profiles, creates diagnostic charts, and saves `results/seasonality_rank.csv`.
-4. **Forecast-result review** — [`notebooks/03_forecasting_results.ipynb`](notebooks/03_forecasting_results.ipynb) summarizes saved backtest scores, convergence, and fallback records. It does not fit forecasting models.
+4. **Baseline forecasts (Block 3)** — [`notebooks/03_forecasting_results.ipynb`](notebooks/03_forecasting_results.ipynb) explains the models and metrics, ranks the models overall, by horizon, product, and regime, checks SARIMA convergence and fallbacks, and refits every model for the final July–September 2025 holdout. It needs the backtest CSVs and the holdout file (below).
+5. **Bridge to optimization (Block 4)** — [`notebooks/04_optimization_bridge.ipynb`](notebooks/04_optimization_bridge.ipynb) states the procurement-planning linear program the forecasts feed, solves an illustrative version for carrots and potatoes with the backtest forecasts, and lists the current limitations and next steps.
 
-The extraction and seasonality calculations can also be run from the project root:
+Before notebooks 03 and 04, run from the project root (Windows paths shown; on macOS/Linux use `.venv/bin/python src/...`):
 
 ```powershell
-.\venv\Scripts\python.exe .\src\data\prepare_prices.py
-.\venv\Scripts\python.exe .\src\eda\check_seasonality.py
+.\venv\Scripts\python.exe .\src\data\prepare_prices.py                 # data/processed/avg_prices_monthly.csv
+.\venv\Scripts\python.exe .\src\data\prepare_holdout.py                # data/processed/avg_prices_holdout.csv (~1 min, reads the XLSX)
+.\venv\Scripts\python.exe .\src\forecasting\no_ml_predictions_v4.py    # results/backtest_results.csv etc. (~20 s)
+.\venv\Scripts\python.exe .\src\eda\check_seasonality.py               # optional: results/seasonality_rank.csv
 ```
 
 ## Preliminary EDA findings
@@ -103,24 +109,20 @@ The script reports MAE, RMSE, MASE, and sMAPE, tracks SARIMA convergence, and re
 
 The forecast scripts `no_ml_predictions.py`, `no_ml_predictions_v2.py`, and `no_ml_predictions_v3.py` are earlier experiment versions. Use v4 for the current workflow; earlier versions may overwrite result files.
 
-Run the current baseline from the project root:
+Importing the module (as notebook 03 does) exposes `MODELS`, `load_targets`, and `guarded_forecast` without running the backtest or silencing warnings; both happen only when the file is executed as a script. SARIMA and ETS are fitted by numerical optimisers, so their forecasts can differ slightly between machines and library versions; the four naive-family benchmarks are exact.
 
-```powershell
-.\venv\Scripts\python.exe .\src\forecasting\no_ml_predictions_v4.py
-```
+**Main baseline findings** (full tables and charts in notebook 03; numbers from the run of 2026-11-15):
 
-## Optimization, limitations, and next steps
+- Naive is a hard benchmark. ETS is best overall but only about 7% better than naive over 12 months; averaged over 1–3 months ahead, naive, ETS, and SARIMA are nearly tied.
+- Pure seasonal naive is the worst model: the price level moves too much for last year's value to be a good guess. ETS and SARIMA, which model level and seasonality together, beat naive by 10–24% at 3–7 months ahead; from 9 months drift is best.
+- The best model differs by product (ETS: potato, eggs, sunflower oil; SARIMA: carrot; drift: milk; naive: gasoline).
+- On the July–September 2025 holdout, ETS and SARIMA have the lowest mean MASE because no product goes badly wrong for them.
 
-Strongly seasonal produce may motivate a future storage or procurement-planning scenario. Price forecasts alone are not sufficient for an optimization model: demand, purchase and selling prices, storage capacity, spoilage, operating costs, lead times, and budget constraints are also needed.
+## Optimization bridge, limitations, and next steps
 
-The source contains prices but not product-level sales quantities or demand. Price elasticity and demand response therefore cannot be identified from this dataset alone. Any future optimization exercise that uses synthetic inputs should label assumptions and generated data explicitly.
+Notebook 04 formulates a procurement-planning linear program: a buyer with a fixed monthly need chooses monthly purchases and storage, given forecast prices, spoilage, storage cost, and capacity. Only prices come from the data; demand and the cost parameters are explicitly labelled assumptions. Plans are made with each model's backtest forecast and scored at actual prices. For carrots (stable seasonality) the forecast-based plans recover about half of the saving that perfect foresight would give; for potatoes (unstable seasonality) they cost slightly more than buying every month. Forecast accuracy (MASE) and decision value can therefore disagree.
 
-Recommended next steps:
-
-1. Review model scores by product, forecast horizon, and regime, including SARIMA convergence and fallback cases.
-2. Use the annual seasonal-profile charts to assess whether the observed vegetable and egg patterns recur across years.
-3. Prepare the course progress presentation: explain the data and target, EDA, rolling-origin validation, baseline results, limitations, and planned next steps.
-4. If pursuing optimization, collect additional operational/demand data or define and clearly label a synthetic scenario.
+The source contains retail prices but no quantities, demand, or wholesale prices, so price elasticity and selling-side decisions cannot be estimated from it. Notebook 04 lists the data, forecasting, and optimization limitations and the planned next steps: prediction intervals feeding stochastic or robust optimization, monthly re-planning, model selection by decision cost, and ML models with exogenous drivers benchmarked against naive.
 
 ## Dependencies
 
